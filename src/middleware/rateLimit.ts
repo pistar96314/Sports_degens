@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from "express";
-import { getEnv } from "../config/env";
 
 type Bucket = {
   resetAt: number;
@@ -11,9 +10,10 @@ type Bucket = {
  * If you later run multiple instances, swap this with Redis-backed limiter.
  */
 export function rateLimit(options?: { windowMs?: number; max?: number }) {
-  const env = getEnv();
-  const windowMs = options?.windowMs ?? env.AUTH_RATE_LIMIT_WINDOW_MS;
-  const max = options?.max ?? env.AUTH_RATE_LIMIT_MAX;
+  const windowMs =
+    options?.windowMs ??
+    Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000);
+  const max = options?.max ?? Number(process.env.AUTH_RATE_LIMIT_MAX ?? 60);
 
   const buckets = new Map<string, Bucket>();
 

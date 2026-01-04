@@ -25,6 +25,15 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ID: z.string().optional(),
 
+  // Auth hardening (v02)
+  CAPTCHA_LOGIN_REQUIRED: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "").toLowerCase() === "true"),
+  CAPTCHA_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
+
   // Safety / dev helpers
   TOOLS_DEV_BYPASS: z
     .string()

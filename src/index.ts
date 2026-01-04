@@ -16,6 +16,8 @@ import paymentRoutes from "./routes/payment";
 import casinoRoutes from "./routes/casino";
 
 // Load environment variables (local dev)
+// In local development it's common for Windows/user env vars to be set (sometimes empty).
+// `override: true` ensures values from the project's .env file are used.
 dotenv.config({ override: true });
 
 console.log("ODDS_API_KEY:   ", JSON.stringify(process.env.ODDS_API_KEY));

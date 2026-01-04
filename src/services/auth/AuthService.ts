@@ -1,8 +1,8 @@
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { User, IUser } from '../../models/User';
-import { logger } from '../../utils/logger';
-import { JwtPayload } from '../../types';
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { User, IUser } from "../../models/User";
+import { logger } from "../../utils/logger";
+import { JwtPayload } from "../../types";
 
 export interface RegisterData {
   username: string;
@@ -28,7 +28,7 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new Error('User with this email or username already exists');
+      throw new Error("User with this email or username already exists");
     }
 
     // Hash password
@@ -64,24 +64,24 @@ export class AuthService {
     // Find user
     const user = await User.findOne({ email });
     if (!user) {
-      throw new Error('Invalid email or password');
+      throw new Error("Invalid email or password");
     }
 
     // Check if user has password (OAuth users won't have password)
     if (!user.passwordHash) {
-      throw new Error('Please use OAuth login for this account');
+      throw new Error("Please use OAuth login for this account");
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
-      throw new Error('Invalid email or password');
+      throw new Error("Invalid email or password");
     }
 
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
-      throw new Error('JWT_SECRET is not configured');
+      throw new Error("JWT_SECRET is not configured");
     }
 
     const payload: JwtPayload = {
@@ -91,7 +91,7 @@ export class AuthService {
     };
 
     const token = jwt.sign(payload, jwtSecret, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     } as jwt.SignOptions);
 
     logger.info(`User logged in: ${user.username} (${user.email})`);
@@ -105,7 +105,7 @@ export class AuthService {
   generateToken(user: IUser): string {
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
-      throw new Error('JWT_SECRET is not configured');
+      throw new Error("JWT_SECRET is not configured");
     }
 
     const payload: JwtPayload = {
@@ -115,10 +115,9 @@ export class AuthService {
     };
 
     return jwt.sign(payload, jwtSecret, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     } as jwt.SignOptions);
   }
 }
 
 export const authService = new AuthService();
-
