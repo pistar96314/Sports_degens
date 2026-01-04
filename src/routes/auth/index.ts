@@ -4,6 +4,7 @@ import {
   login,
   createCaptchaChallenge,
   verifyCaptchaChallenge,
+  getMe,
 } from "../../controllers/authController";
 import { validate } from "../../middleware/validate";
 import {
@@ -13,12 +14,16 @@ import {
   captchaVerifySchema,
 } from "./schemas";
 import { rateLimit } from "../../middleware/rateLimit";
+import { authenticate } from "../../middleware/auth";
 
 const router = Router();
 
 // Public routes
 router.post("/register", validate(registerSchema), register);
 router.post("/login", validate(loginSchema), login);
+
+// Protected route (v04): helpful for Postman token validation
+router.get("/me", authenticate, getMe);
 
 // v02: captcha scaffold
 router.post(

@@ -169,3 +169,13 @@ export const verifyCaptchaChallenge = async (
     } as ApiResponse);
   }
 };
+
+// v04: return current authenticated user (useful for Postman testing)
+export const getMe = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res
+      .status(401)
+      .json({ success: false, error: { message: "Unauthorized" } });
+  }
+  return res.json({ success: true, data: { user: req.user } });
+};
