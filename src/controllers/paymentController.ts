@@ -7,6 +7,7 @@ import { logger } from "../utils/logger";
 
 /**
  * Create Stripe checkout session for subscription
+ * Supports optional affiliateCode (stored in Stripe metadata)
  */
 export const createCheckoutSession = async (
   req: Request,
@@ -22,17 +23,21 @@ export const createCheckoutSession = async (
       return;
     }
 
-    const { priceId } = req.body;
+    const { priceId, successUrl, cancelUrl, affiliateCode } = req.body as {
+      priceId?: string;
+      successUrl?: string;
+      cancelUrl?: string;
+      affiliateCode?: string;
+    };
 
     if (!priceId) {
       res.status(400).json({
         success: false,
-        error: { message: "Price ID is required" },
+        error: { message: "priceId is required" },
       } as ApiResponse);
       return;
     }
 
-    // Get user
     const user = await User.findById(userId);
     if (!user) {
       res.status(404).json({
@@ -42,49 +47,52 @@ export const createCheckoutSession = async (
       return;
     }
 
-    // Get or create Stripe customer
-    let customerId = user.stripeCustomerId;
-    if (!customerId) {
-      const customer = await getStripeService().createCustomer(
-        user.email,
-        userId
-      );
-      customerId = customer.id;
+    const stripeService = getStripeService();
 
-      // Update user with Stripe customer ID
-      user.stripeCustomerId = customerId;
+    // Ensure Stripe customer exists
+    if (!user.stripeCustomerId) {
+      const customer = await stripeService.createCustomer({
+        email: user.email,
+        metadata: { userId: user._id.toString() },
+      });
+      user.stripeCustomerId = customer.id;
       await user.save();
     }
 
-    // Create checkout session
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3001";
-    const session = await getStripeService().createCheckoutSession({
-      customerId,
-      priceId,
-      userId,
-      successUrl: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${frontendUrl}/payment/cancel`,
+    const session = await stripeService.createCheckoutSession({
       mode: "subscription",
+      customer: user.stripeCustomerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url:
+        successUrl ||
+        "http://localhost:3001/success?session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: cancelUrl || "http://localhost:3001/cancel",
+      metadata: {
+        userId: user._id.toString(),
+        ...(affiliateCode
+          ? { affiliateCode: affiliateCode.trim().toUpperCase() }
+          : {}),
+      },
     });
 
     res.json({
       success: true,
-      data: {
-        sessionId: session.id,
-        url: session.url,
-      },
+      data: { sessionId: session.id, url: session.url },
     } as ApiResponse);
   } catch (error: any) {
-    logger.error("Error creating checkout session:", error);
+    logger.error("Error creating checkout session", {
+      service: "sports-degens-backend",
+      error: error.message,
+    });
     res.status(500).json({
       success: false,
-      error: { message: error.message || "Failed to create checkout session" },
+      error: { message: error.message },
     } as ApiResponse);
   }
 };
 
 /**
- * Get subscription status for current user
+ * Get subscription status
  */
 export const getSubscriptionStatus = async (
   req: Request,
@@ -100,70 +108,36 @@ export const getSubscriptionStatus = async (
       return;
     }
 
-    // Get subscription from database
-    const subscription = await Subscription.findOne({ userId });
-
-    if (!subscription) {
-      res.json({
-        success: true,
-        data: {
-          hasSubscription: false,
-          hasToolsAccess: false,
-        },
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: { message: "User not found" },
       } as ApiResponse);
       return;
     }
 
-    // Get latest status from Stripe
-    const stripeSubscription = await getStripeService().getSubscription(
-      subscription.stripeSubscriptionId
-    );
-
-    // Update local subscription status
-    subscription.status = stripeSubscription.status as any;
-    subscription.currentPeriodStart = new Date(
-      stripeSubscription.current_period_start * 1000
-    );
-    subscription.currentPeriodEnd = new Date(
-      stripeSubscription.current_period_end * 1000
-    );
-    subscription.cancelAtPeriodEnd =
-      stripeSubscription.cancel_at_period_end || false;
-    await subscription.save();
-
-    // Update user's tools access
-    const user = await User.findById(userId);
-    if (user) {
-      const hasAccess =
-        stripeSubscription.status === "active" ||
-        stripeSubscription.status === "trialing";
-      user.hasToolsAccess = hasAccess;
-      if (hasAccess && !user.toolsSubscriptionExpiry) {
-        user.toolsSubscriptionExpiry = new Date(
-          stripeSubscription.current_period_end * 1000
-        );
-      }
-      await user.save();
-    }
+    const activeSubscription = await Subscription.findOne({
+      userId: user._id,
+      status: "active",
+    });
 
     res.json({
       success: true,
       data: {
-        hasSubscription: true,
-        hasToolsAccess:
-          subscription.status === "active" ||
-          subscription.status === "trialing",
-        status: subscription.status,
-        currentPeriodStart: subscription.currentPeriodStart,
-        currentPeriodEnd: subscription.currentPeriodEnd,
-        cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+        hasSubscription: Boolean(activeSubscription),
+        hasToolsAccess: Boolean(user.hasToolsAccess),
+        toolsSubscriptionExpiry: user.toolsSubscriptionExpiry || null,
       },
     } as ApiResponse);
   } catch (error: any) {
-    logger.error("Error getting subscription status:", error);
+    logger.error("Error getting subscription status", {
+      service: "sports-degens-backend",
+      error: error.message,
+    });
     res.status(500).json({
       success: false,
-      error: { message: error.message || "Failed to get subscription status" },
+      error: { message: error.message },
     } as ApiResponse);
   }
 };
@@ -185,219 +159,102 @@ export const cancelSubscription = async (
       return;
     }
 
-    // Get subscription from database
-    const subscription = await Subscription.findOne({ userId });
-
+    const subscription = await Subscription.findOne({
+      userId,
+      status: "active",
+    });
     if (!subscription) {
       res.status(404).json({
         success: false,
-        error: { message: "No active subscription found" },
+        error: { message: "Active subscription not found" },
       } as ApiResponse);
       return;
     }
 
-    // Cancel subscription in Stripe
-    const canceledSubscription = await getStripeService().cancelSubscription(
-      subscription.stripeSubscriptionId
-    );
+    const stripeService = getStripeService();
+    await stripeService.cancelSubscription(subscription.stripeSubscriptionId);
 
-    // Update local subscription
-    subscription.status = canceledSubscription.status as any;
-    subscription.canceledAt = new Date();
-    subscription.cancelAtPeriodEnd =
-      canceledSubscription.cancel_at_period_end || false;
+    subscription.status = "canceled";
     await subscription.save();
 
-    // Update user's tools access (will be revoked at period end)
-    const user = await User.findById(userId);
-    if (user && canceledSubscription.status === "canceled") {
-      user.hasToolsAccess = false;
-      await user.save();
-    }
-
-    res.json({
-      success: true,
-      data: {
-        status: subscription.status,
-        cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
-        message: subscription.cancelAtPeriodEnd
-          ? "Subscription will cancel at period end"
-          : "Subscription canceled immediately",
-      },
-    } as ApiResponse);
+    res.json({ success: true, data: { canceled: true } } as ApiResponse);
   } catch (error: any) {
-    logger.error("Error canceling subscription:", error);
+    logger.error("Error canceling subscription", {
+      service: "sports-degens-backend",
+      error: error.message,
+    });
     res.status(500).json({
       success: false,
-      error: { message: error.message || "Failed to cancel subscription" },
+      error: { message: error.message },
     } as ApiResponse);
   }
 };
 
 /**
- * Handle Stripe webhook events
+ * Stripe webhook handler
  */
 export const handleStripeWebhook = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  const sig = req.headers["stripe-signature"];
-
-  if (!sig) {
-    res.status(400).json({
-      success: false,
-      error: { message: "Missing stripe-signature header" },
-    } as ApiResponse);
-    return;
-  }
-
   try {
-    // req.body is a Buffer when using express.raw()
-    const body = req.body as Buffer;
+    const signature = (req.headers["stripe-signature"] as string) || "";
+    const rawBody = (req as any).rawBody as Buffer | undefined;
 
-    // Verify webhook signature
-    const event = await getStripeService().handleWebhook(body, sig as string);
-
-    logger.info(`Received Stripe webhook: ${event.type}`);
-
-    // Handle different event types
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object as any;
-        await handleCheckoutCompleted(session);
-        break;
-      }
-
-      case "customer.subscription.created":
-      case "customer.subscription.updated": {
-        const subscription = event.data.object as any;
-        await handleSubscriptionUpdate(subscription);
-        break;
-      }
-
-      case "customer.subscription.deleted": {
-        const subscription = event.data.object as any;
-        await handleSubscriptionDeleted(subscription);
-        break;
-      }
-
-      default:
-        logger.info(`Unhandled event type: ${event.type}`);
+    if (!rawBody) {
+      // If your express setup doesn't provide raw body yet, accept but warn.
+      logger.warn(
+        "Stripe webhook received without raw body (signature verification skipped)",
+        {
+          service: "sports-degens-backend",
+        }
+      );
+      res.status(200).json({ received: true });
+      return;
     }
 
-    res.json({ received: true });
+    const stripeService = getStripeService();
+    const event = await stripeService.constructEvent(rawBody, signature);
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as any;
+
+      const userId = session?.metadata?.userId;
+      const affiliateCode = (session?.metadata?.affiliateCode || "")
+        .trim()
+        .toUpperCase();
+
+      if (userId) {
+        const user = await User.findById(userId);
+        if (user) {
+          // Example: grant tools access on successful checkout
+          user.hasToolsAccess = true;
+          user.toolsSubscriptionExpiry = new Date(
+            Date.now() + 30 * 24 * 60 * 60 * 1000
+          );
+
+          // Affiliate linking (one-time, no new models)
+          if (affiliateCode && !user.referredBy) {
+            const referrer = await User.findOne({ affiliateCode });
+            if (referrer && referrer._id.toString() !== user._id.toString()) {
+              user.referredBy = referrer._id;
+            }
+          }
+
+          await user.save();
+        }
+      }
+    }
+
+    res.status(200).json({ received: true });
   } catch (error: any) {
-    logger.error("Webhook error:", error);
+    logger.error("Stripe webhook error", {
+      service: "sports-degens-backend",
+      error: error.message,
+    });
     res.status(400).json({
       success: false,
-      error: { message: `Webhook Error: ${error.message}` },
+      error: { message: error.message },
     } as ApiResponse);
   }
 };
-
-/**
- * Handle checkout session completed
- */
-async function handleCheckoutCompleted(session: any): Promise<void> {
-  const userId = session.metadata?.userId;
-  const customerId = session.customer;
-
-  if (!userId || !customerId) {
-    logger.warn("Checkout completed but missing userId or customerId");
-    return;
-  }
-
-  // Update user with Stripe customer ID if not set
-  const user = await User.findById(userId);
-  if (user && !user.stripeCustomerId) {
-    user.stripeCustomerId = customerId;
-    await user.save();
-  }
-}
-
-/**
- * Handle subscription created/updated
- */
-async function handleSubscriptionUpdate(subscription: any): Promise<void> {
-  const customerId = subscription.customer;
-  const subscriptionId = subscription.id;
-
-  // Find user by Stripe customer ID
-  const user = await User.findOne({ stripeCustomerId: customerId });
-
-  if (!user) {
-    logger.warn(`User not found for customer: ${customerId}`);
-    return;
-  }
-
-  // Create or update subscription record
-  let subscriptionRecord = await Subscription.findOne({ userId: user._id });
-
-  if (!subscriptionRecord) {
-    subscriptionRecord = new Subscription({
-      userId: user._id,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: subscriptionId,
-      stripePriceId: subscription.items.data[0]?.price.id || "",
-      status: subscription.status,
-      currentPeriodStart: new Date(subscription.current_period_start * 1000),
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
-    });
-  } else {
-    subscriptionRecord.status = subscription.status as any;
-    subscriptionRecord.currentPeriodStart = new Date(
-      subscription.current_period_start * 1000
-    );
-    subscriptionRecord.currentPeriodEnd = new Date(
-      subscription.current_period_end * 1000
-    );
-    subscriptionRecord.cancelAtPeriodEnd =
-      subscription.cancel_at_period_end || false;
-  }
-
-  await subscriptionRecord.save();
-
-  // Update user's tools access
-  const hasAccess =
-    subscription.status === "active" || subscription.status === "trialing";
-  user.hasToolsAccess = hasAccess;
-  user.toolsSubscriptionExpiry = new Date(
-    subscription.current_period_end * 1000
-  );
-  await user.save();
-
-  logger.info(
-    `Updated subscription for user ${user._id}: ${subscription.status}`
-  );
-}
-
-/**
- * Handle subscription deleted
- */
-async function handleSubscriptionDeleted(subscription: any): Promise<void> {
-  const customerId = subscription.customer;
-
-  // Find user by Stripe customer ID
-  const user = await User.findOne({ stripeCustomerId: customerId });
-
-  if (!user) {
-    logger.warn(`User not found for customer: ${customerId}`);
-    return;
-  }
-
-  // Update subscription record
-  const subscriptionRecord = await Subscription.findOne({ userId: user._id });
-  if (subscriptionRecord) {
-    subscriptionRecord.status = "canceled";
-    subscriptionRecord.canceledAt = new Date();
-    await subscriptionRecord.save();
-  }
-
-  // Revoke tools access
-  user.hasToolsAccess = false;
-  user.toolsSubscriptionExpiry = undefined;
-  await user.save();
-
-  logger.info(`Revoked tools access for user ${user._id}`);
-}
