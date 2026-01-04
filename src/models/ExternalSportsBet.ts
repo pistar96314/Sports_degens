@@ -4,8 +4,8 @@ export interface IExternalSportsBet extends Document {
   id: string;
   user_id: string;
   sportsbook_id: string;
-  stake_amount: number;
-  payout_amount: number;
+  stake_amount: mongoose.Types.Decimal128;
+  payout_amount: mongoose.Types.Decimal128;
   result: string;
   placed_at: Date;
   settled_at: Date;

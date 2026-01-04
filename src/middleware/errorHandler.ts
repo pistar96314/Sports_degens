@@ -10,13 +10,15 @@ export const errorHandler = (
   err: AppError,
   req: Request,
   res: Response,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction
 ): void => {
-  const statusCode = err.statusCode || 500;
+  const statusCode = err.statusCode ?? 500;
   const message = err.message || 'Internal Server Error';
 
-  logger.error({
-    error: err.message,
+  logger.error('Unhandled error', {
+    message,
+    statusCode,
     stack: err.stack,
     path: req.path,
     method: req.method,
@@ -26,8 +28,7 @@ export const errorHandler = (
     success: false,
     error: {
       message,
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+      ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
     },
   });
 };
-

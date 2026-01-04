@@ -52,6 +52,12 @@ export const requireToolsAccess = async (
     const { User } = await import('../models/User');
 
     // Check if user has tools access
+    // DEV helper: allow tools routes without subscription (use only locally)
+    if ((process.env.TOOLS_DEV_BYPASS || '').toLowerCase() === 'true') {
+      next();
+      return;
+    }
+
     const user = await User.findById(req.user.userId);
     if (!user || !user.hasToolsAccess) {
       res.status(403).json({
@@ -69,4 +75,3 @@ export const requireToolsAccess = async (
     });
   }
 };
-

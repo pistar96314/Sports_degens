@@ -5,8 +5,8 @@ export interface IUserParlay extends Document {
   user_id: string;
   parlay_recommendation_id: string;
   sportsbook_id: string;
-  stake_amount: number;
-  potential_payout: number;
+  stake_amount: mongoose.Types.Decimal128;
+  potential_payout: mongoose.Types.Decimal128;
   placed_at: Date;
   settled_at: Date;
   status: string;
