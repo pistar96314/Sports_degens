@@ -1,17 +1,17 @@
-import axios from 'axios';
-import { logger } from '../../utils/logger';
+import axios from "axios";
+import { logger } from "../../utils/logger";
 
 export class OddsApiService {
-  private apiKey: string;
+  // private apiKey: string;
   private baseUrl: string;
 
   constructor() {
-    this.apiKey = process.env.ODDS_API_KEY || '';
-    this.baseUrl = process.env.ODDS_API_BASE_URL || 'https://api.the-odds-api.com/v4';
-    
-    if (!this.apiKey) {
-      logger.warn('ODDS_API_KEY not configured');
-    }
+    this.baseUrl =
+      process.env.ODDS_API_BASE_URL || "https://api.the-odds-api.com/v4";
+  }
+
+  private getApikey(): string {
+    return (process.env.ODDS_API_KEY || "").trim();
   }
 
   /**
@@ -21,26 +21,40 @@ export class OddsApiService {
     sport: string;
     regions?: string[];
     markets?: string[];
-    oddsFormat?: 'american' | 'decimal' | 'hongkong';
+    oddsFormat?: "american" | "decimal" | "hongkong";
   }) {
+    // If no API key is configured, do NOT call the external Odds API.
+    if (!this.getApikey()) {
+      return {
+        data: [],
+        remaining: 0,
+        warning: "ODDS_API_KEY not configured" as const,
+      };
+    }
+
     try {
-      const { sport, regions = ['us'], markets = ['h2h', 'spreads', 'totals'], oddsFormat = 'american' } = params;
-      
+      const {
+        sport,
+        regions = ["us"],
+        markets = ["h2h", "spreads", "totals"],
+        oddsFormat = "american",
+      } = params;
+
       const response = await axios.get(`${this.baseUrl}/sports/${sport}/odds`, {
         params: {
-          apiKey: this.apiKey,
-          regions: regions.join(','),
-          markets: markets.join(','),
+          apiKey: this.getApikey(),
+          regions: regions.join(","),
+          markets: markets.join(","),
           oddsFormat,
         },
       });
 
       return {
         data: response.data,
-        remaining: parseInt(response.headers['x-requests-remaining'] || '0'),
+        remaining: parseInt(response.headers["x-requests-remaining"] || "0"),
       };
     } catch (error) {
-      logger.error('Error fetching odds:', error);
+      logger.error("Error fetching odds:", error);
       throw error;
     }
   }
@@ -49,19 +63,30 @@ export class OddsApiService {
    * Get available sports
    */
   async getSports() {
+    // If no API key is configured, do NOT call the external Odds API.
+    // This keeps local dev / CI running and returns a safe empty list.
+    if (!this.getApikey()) {
+      return {
+        data: [],
+        remaining: 0,
+        warning: "ODDS_API_KEY not configured" as const,
+      };
+    }
+
     try {
       const response = await axios.get(`${this.baseUrl}/sports`, {
         params: {
-          apiKey: this.apiKey,
+          apiKey: this.getApikey(),
         },
       });
 
       return {
         data: response.data,
-        remaining: parseInt(response.headers['x-requests-remaining'] || '0'),
+        remaining: parseInt(response.headers["x-requests-remaining"] || "0"),
       };
     } catch (error) {
-      logger.error('Error fetching sports:', error);
+      logger.error("Error fetching sports:", error);
+      // Surface upstream errors to caller (controller will format response)
       throw error;
     }
   }
@@ -75,11 +100,10 @@ export class OddsApiService {
       const sport = (sports as any[]).find((s) => s.key === sportKey);
       return sport || null;
     } catch (error) {
-      logger.error('Error getting sport by key:', error);
+      logger.error("Error getting sport by key:", error);
       return null;
     }
   }
 }
 
 export const oddsApiService = new OddsApiService();
-
