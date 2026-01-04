@@ -8,12 +8,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import { logger } from "./utils/logger";
 import { createDirectories } from "./utils/createDirectories";
 import baseRoutes from "./routes";
-import authRoutes from "./routes/auth";
-import sportsToolsRoutes from "./routes/sports-tools";
-import paymentRoutes from "./routes/payment";
-import casinoRoutes from "./routes/casino";
 
-import affiliateRoutes from "./routes/affiliate";
 // Load environment variables (local dev)
 // In local development it's common for Windows/user env vars to be set (sometimes empty).
 // `override: true` ensures values from the project's .env file are used.
@@ -52,17 +47,10 @@ app.use((req, _res, next) => {
   logger.debug(`${req.method} ${req.path}`);
   next();
 });
-// Health check
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
+
 // API Routes
 
-app.use("/api/auth", authRoutes);
-app.use("/api/sports-tools", sportsToolsRoutes);
-app.use("/api/casino", casinoRoutes);
-app.use("/api/payment", paymentRoutes);
-app.use("/api/affiliate", affiliateRoutes);
+app.use("/api", baseRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
